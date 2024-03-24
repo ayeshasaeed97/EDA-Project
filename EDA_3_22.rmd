@@ -1,0 +1,433 @@
+---
+title: "Exploratory Data Analysis of Environmental Justice Screening (EJScreen) Data"
+author: "Nathan Yoo & Ayesha Saeed"
+date: "2024-03-19"
+output: html_document
+---
+```{r setup, include=FALSE}
+#Loading packages + dataset
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+library(tidyverse)
+library(knitr)
+library(DT)
+library(kableExtra)
+
+#EJScreenData <- read.csv("/Users/natha/Downloads/QTM302w/data/env-data.csv")
+EJScreenData <- read.csv("/Users/ayeshasaeed/Documents/EJSCREEN_2023_BG_with_AS_CNMI_GU_VI.csv")
+```
+
+
+***
+## Introduction:
+The Environmental Protection Agency created an Environmental Justice Screening and Mapping Tool called EJScreen that tracks both demographic and environmental factors that impact environmental health. Having socioeconomic information linked with environmental indexes allows researchers to draw connections between the two to determine how there is inequity in environmental health. The dataset we chose tracks these factors on a national level, including education level, traffic proximity, ozone, unemployment rate, and low-income. We can use the EJScreen data to find correlation between these variables to identify potential risks in environmental health for underprivileged demographics.
+
+Our motivation behind choosing this dataset is to see if socioeconomic factors such as education level or unemployment rate have a correlation with environmental factors that pose a risk to an individual’s physical and mental well-being. Additionally, we can draw comparisons across geographic borders by filtering by states. For example, less densely populated states might have lower levels of environmental health disparities as compared to those in more densely populated states. Furthermore, we can isolate states and look at data in a specific state if we see something of interest during our initial analysis. 
+
+Ethically, it is important to make a conscious effort to put our analyses in broader social, economic, and historical context when considering inequalities. Intersectionality plays a big role in environmental justice, so factors such as race, geographic location, and age must be considered when drawing conclusions in this exploratory data analysis.
+
+For the purposes of our investigation, we will identify variables of interest as our dataset is very large. Covering all of them would be an injustice to our report, so our team will look through them and decide which could present interesting and meaningful insights.
+
+#### Explanation of Indices
+EJScreen utilizes two types of indices: Demographic Index and a Supplemental Demographic Index. The Demographic Index is calculated by averaging the percentage of low income populations and the percentage that are people of color within the region. The Supplemental Demographic Index averages five socioeconomic indicators: percentage of low life expectancy, percentage of low income, percentage of unemployment rate, percentage of limited English speaking, and percentage of less than high school education (in the code book, these are referred to as the following variables: life_exp, lowincome, unemp_rate, limitedEng, lessHighSchol). These indicators are then used to capture the effect of these socioeconomic factors on environmental indicators by doing: Socioeconomic Index (Demographic or Supplemental Demographic Index) * Normalized Environmental Indicator. Those that are weighted by the Demographic Index are prefixed with a "D2", and those that are weighted by the Supplemental Demographic Index are prefixed with a "D5."
+
+***
+
+## Data Cleaning & Filtering
+
+Since the dataset is very large and likely contains many missing values, it is essential that we clean it to make our analysis smoother and more meaningful. Additionally, it is important to reduce the number of variables in our dataset because there are over 200. Ideally, we should look at no more than 20 variables as ones of interest and further narrow down from there for further analysis (ex: correlational). The following steps are undergone to make the dataset easier to analyze in later steps.
+
+First, we will filter out columns in the EJScreen data that is prefixed with "B_" and "T_" because it is mainly used for plotting purposes for the EJScreen website. 
+
+```{r}
+EJScreenData <- EJScreenData %>%
+  select(-contains(c("B_","T_")))
+```
+
+
+Next we will observe how many missing values there are of each variable. The missingValues array is created by summing the number of missing values across all rows and columns. 'missingData' is a dataframe we create to tabulate the sum of missing values by variable name. The datatable function helps make the table interactive and easier to navigate.
+```{r}
+# Counting the number of missing values in each variable 
+missingValues <- colSums(is.na(EJScreenData))
+missingData <- data.frame(
+  Variables = names(missingValues),
+  MissingValues = missingValues,
+  row.names = NULL
+)
+datatable(missingData, options = list(pageLength = 10))
+```
+
+There are a large number of missing values for some variables. To investigate this issue further, the number of missing values for each state across all features were computed. Grouping by state allows us to see if certain geoareas have less coverage from EJ screen.
+
+```{r}
+# Finding the number of entries from each state
+countStates <- EJScreenData %>%
+  count(STATE_NAME)
+datatable(countStates, options = list(pageLength = 10))
+
+# Finding the number of missing values for each state 
+countMissingStates <- EJScreenData %>%
+  group_by(STATE_NAME) %>%
+  summarize_all(funs(sum(is.na(.))))
+datatable(countMissingStates, options = list(pageLength = 10, scrollX = TRUE))
+```
+
+There are a large amount of missing values coming from US territories such as American Samoa, Virgin Islands, Puerto Rico, Northern Mariana Islands, and Guam. These territories were filtered out from further analysis because a large number of missing values is difficult to handle. 
+
+The number of missing values across variables is re-calculated to see how many missing values are still present after filtering above mentioned areas. 
+
+```{r}
+EJScreenDataFiltered <- EJScreenData %>% 
+  filter(STATE_NAME != "American Samoa" & 
+         STATE_NAME != "Virgin Islands" & 
+         STATE_NAME != "Puerto Rico" & 
+         STATE_NAME != "Northern Mariana Is" & 
+         STATE_NAME != "Guam")
+
+# Re-computing missing values 
+missingValuesFiltered <- colSums(is.na(EJScreenDataFiltered))
+missingData <- data.frame(
+  Variables = names(missingValuesFiltered),
+  MissingValues = missingValuesFiltered,
+  row.names = NULL
+)
+datatable(missingData, options = list(pageLength = 10))
+
+countMissingStatesFiltered <- EJScreenDataFiltered %>%
+  group_by(STATE_NAME) %>%
+  summarize_all(funs(sum(is.na(.))))
+
+datatable(countMissingStatesFiltered, options = list(pageLength = 10, scrollX = TRUE))
+
+EJScreenData_EJIndex <- EJScreenDataFiltered%>%
+  select(-contains("D5"))
+EJScreenData_SupIndex <- EJScreenDataFiltered%>%
+  select(-contains("D2"))
+```
+
+***
+## Data Description: Basic Statistical Metrics
+
+To get a better understanding of the data distribution we are working with, a summary of the numerical values of the EJScreen data is shown below.
+
+```{r}
+# Create a subset of data to get summary statistics of numerical values 
+EJScreenDataSummary1 <- EJScreenDataFiltered%>%
+  select(-contains(c("D2", "D5", "P_"))) %>%
+  select(-c("OID_", "STATE_NAME","ID", "CNTY_NAME", "REGION"))
+summaryData <- summary(EJScreenDataSummary1)
+kable(summaryData) %>%
+  kable_styling() %>%
+  scroll_box(width = "100%", height = "500px")
+```
+
+This table shows summary statistics for all numerical variables in the EJScreen dataset. Even after filtering out 100 variables, this table is still too large to draw meaningful insights. Collectively, our team looked at the variables and isolated the ones we thought were interesting. We also wanted to have a good balance of socioeconomic and environmental variables. Below are the variables we chose along with a new summary table.
+
+Because the data includes some technical jargon, certain numerical variables are defined below.
+
+#### Numerical Variables:
+
+- PEOPCOLORPCT: Percentage people of color
+- LOWINCPCT: Percentage low income
+- UNEMPPCT: Percentage unemployed
+- LINGISOPCT: Percentage limited English-speaking households
+- LESSHSPCT: Percentage less than high school education
+- DEMOGIDX_2: Demographic index
+- DEMOGIDX_5: Supplemental demographic index
+- PM25: Percentile for Particulate Matter 2.5
+- OZONE: Ozone index
+- DSLPM: Diesel particulate matter
+- CANCER: Air toxics cancer risk
+- RESP: Air toxics respiratory HI
+- RSEI_AIR: Toxic Releases to Air
+- PTRAF: Traffic proximity
+- PRE1960: Housing units built before 1960
+- PNPL: Superfund proximity
+- PRMP: RMP facility proximity
+- PTSDF: Hazardous waste proximity
+- UST: Underground Storage Tanks
+
+#### Explanation of jargon:
+
+1. **Particulate Matter 2.5 (PM2.5)**:
+PM2.5 refers to fine inhalable particles with diameters that are generally 2.5 micrometers and smaller. These particles can penetrate deep into the lungs and even enter the bloodstream. PM2.5 is a major component of air pollution and can have adverse health effects, particularly on the respiratory and cardiovascular systems.
+
+2. **Superfund**:
+Superfund refers to a program that aims to clean up sites contaminated with hazardous substances and pollutants. Superfund sites can include abandoned hazardous waste sites, as well as active industrial facilities releasing harmful substances.
+
+3. **RMP facility**:
+RMP stands for Risk Management Program. An RMP facility is a site that is subject to the regulations outlined in the United States Environmental Protection Agency's (EPA) Risk Management Program. These facilities handle hazardous chemicals and are required to develop plans and procedures to prevent accidental releases of these substances and to minimize the impact of any releases that do occur.
+
+4. **Ozone**:
+In the Earth's atmosphere, ozone (O3) can be found both at ground level where it is a pollutant. Ground-level ozone is a major component of smog.
+
+5. **Diesel Particulate Matter**:
+Diesel particulate matter (DPM) refers to the microscopic particles that are emitted from diesel engines as a byproduct of combustion. DPM is a component of diesel exhaust and is regulated due to its adverse effects on human health and the environment.
+
+```{r}
+library(kableExtra)
+EJScreenDataSummary <- EJScreenDataFiltered%>%
+  select(c("PEOPCOLORPCT", "LOWINCPCT", "UNEMPPCT", "LINGISOPCT", "LESSHSPCT", "DEMOGIDX_2", "DEMOGIDX_5",
+           "PM25", "OZONE", "DSLPM", "CANCER", "RESP", "RSEI_AIR", "PTRAF", "PRE1960", "PNPL",
+           "PRMP", "PTSDF", "UST"))
+summaryData <- summary(EJScreenDataSummary)
+kable(summaryData) %>%
+  kable_styling() %>%
+  scroll_box(width = "100%", height = "500px")
+```
+Overview of statistical metrics: 
+Since many of the variables we chose to focus on are percentages, the range of the variables is from 0 to 1. Most variables have a mean much larger than the median, so that indicates we would see a right-skewed distribution. However, PM25 looks more evenly distributed or even left-skewed considering the scale of the variable. While these numbers provide as a reference to look back at, we need to visually display the distributions to get a better idea of what we can do with our data.
+
+***
+
+## Exploring the Relationship between Socioeconomic and Environmental Indicators
+
+#### Explanation of numerical variables
+
+Below is a correlation heatmap of socioeconomic and environmental indicators to visualize what variables show correlation with each other. It can be used to better understand what variables should be explored further.
+
+First, a new dataframe object is created by selecting a subset of the EJScreen data. These are variables are of interest and numerical to calculate and visualize correlation between other variables. This new dataframe object is then turned into a correlation matrix by using the `cor()` function. Then, the matrix is plotted using the corrplot library. 
+```{r plots, echo=FALSE}
+## Correlation Matrix of certain numerical values
+
+EJScreenData_Numerical <- EJScreenDataFiltered %>%
+  select(c("PEOPCOLORPCT", "LOWINCPCT", "UNEMPPCT", "LINGISOPCT", "LESSHSPCT", "DEMOGIDX_2", "DEMOGIDX_5",
+           "PM25", "OZONE", "DSLPM", "CANCER", "RESP", "RSEI_AIR", "PTRAF", "PRE1960", "PNPL",
+           "PRMP", "PTSDF", "UST"))
+
+           #"PEOPCOLORPCT", "LOWINCPCT", "UNEMPPCT", "LINGISOPCT", "OVER64PCT", "LIFEEXPPCT",
+           #"P_D2_PM25", "P_D2_OZONE", "P_D2_DSLPM", "P_D2_CANCER", "P_D2_RESP", "P_D2_RSEI_AIR", "P_D2_PTRAF",
+           #"P_D2_LDPNT", "P_D2_PNPL", "P_D2_PRMP", "P_D2_PTSDF", "P_D2_UST", "P_D2_PWDIS", 
+           #"NPL_CNT", "TSDF_CNT"
+corrMatrix <- cor(EJScreenData_Numerical, use = "complete.obs")
+
+library(corrplot)
+corrplot(corrMatrix, method = "color", type = "upper", tl.col = "black", tl.srt = 45)
+```
+
+From the heatmap it is difficult to see any clear relationships between socioeconomic and environmental indicators. To investigate these individual numerical values further, density plots and histograms are visualized down below. 
+
+***
+Below are density plots of the Demographic Index and also the Supplemental Demographic Index to get a visualization of the two indices. These two indices are the indicators used by the Environmental Protection Agency to investigate the effect of socioeconomic factors on environmental injustice. These indices represent socioeconomic factors and values closer to 1 represent areas of socioeconomic disadvantage. 
+
+A density plot was used to graph the Demographic and Supplemental Demographic Index because density plots can be used to easily visualize the data distribution. For this, the ggplot module was used with the `geom_density()`. `labs()` was used to label the x and y axes along with the title. Similar code was run for both indices. 
+
+From the plots, it can be seen that the Demographic Index has a wider distribution ranging from 0 to 1 while the Supplemental Demographic Index has a narrower distribution near 0.1. 
+
+```{r}
+ggplot(data = EJScreenDataFiltered, aes(x = DEMOGIDX_2)) +
+  geom_density(color = "blue", fill = "lightblue", alpha = 0.5) +  
+  theme_minimal() +
+  labs(x = "Demographic Index", y = "Density",  
+       title = "Density Plot of Demographic Index")  # Add plot title & labels
+ggplot(data = EJScreenDataFiltered, aes(x = DEMOGIDX_5)) +
+  geom_density(color = "red", fill = "pink", alpha = 0.5) +  
+  theme_minimal() +
+  labs(x = "Supplemental Demographic Index", y = "Density",  
+       title = "Density Plot of Supplemental Demographic Index")  # Add plot title & labels
+
+```
+
+***
+Next, to investigate the socioeconomic variables contained within the EJScreen data, a series of histograms were plotted. 
+* PEOPCOLORPCT = Percentage of people that are of color
+* LOWINCPCT = Percentage of people that are considered low income
+* UEMPPCT = Percentage of people that are unemployed
+* LINGISOPCT = Percentage of people that have limited speaking ability 
+* LESSHSPCT = Percentage of people that have less than high school education
+
+The above mentioned socioeconomic variables were chosen because these are the variables that are used to calculate both the Demographic and Supplemental Demographic Index. These variables are also some of the most commonly used socioeconomic indicators. 
+
+First, we store the socioeconomic variables of interest and create a 2 row by 3 column grid where the produced histograms can go (through `par(mfrow = c(2,3))`. Then, we take each of the variables stored in socioeconomic variables through the use of a `for()` loop and call the `hist()` function for each variable. We then reset the layout by calling `par(mfrow = c(1, 1))`.
+
+From the produced histograms, it can be seen that the percentage of low income, percentage of unemployment, percentage of limited English speaking, and percentage of less than high school education seems to be skewed left with percentage of low income having a wider distribution than the others. Additionally, it can be seen that the percentage of people of color has a bimodal distribution with two peaks at each end of the spectrum. 
+
+```{r}
+# Socioeconomic Variables
+socioeconomic_variables<- c("PEOPCOLORPCT", "LOWINCPCT", "UNEMPPCT", "LINGISOPCT", "LESSHSPCT")
+
+# create 2 rows & 3 column plot layout 
+par(mfrow = c(2, 3))
+
+# use a for loop to plot each variable into a histogram
+for (variable in socioeconomic_variables) {
+  hist(EJScreenDataFiltered[[variable]], main = variable, xlab = "")
+}
+
+# Reset plot layout
+par(mfrow = c(1,1))
+```
+Moreover, to investigate the environmental variables as well, a series of histograms were plotted. We chose to investigate a wide range of environmental variables. We first plotted the following environmental variables:
+
+* PM25 = Particulate Matter 2.5
+* OZONE = Ozone
+* DSLPM = Diesel particulate matter
+* CANCER = Air toxics cancer risk 
+* RESP = Air toxics respiratory HI
+* RSEI_AIR = Toxic releases to air
+
+We follow a similar approach as above by storing variables of interest into a list or a vector, and then going through each variable and calling the `hist()` function. We utilize `par(mfrow = c(2,3))` here as well to create a layout of plots that is 2 rows by 3 columns.  
+
+From the produced histograms, it can be seen that diesel particulate matter, air toxics cancer risk, air toxics cancer risk, air toxics respiratory HI, toxic releases to air are highly skewed left. This could also indicate some large outliers in these variables, which could be worth investigating further. We can also see that particulate matter 2.5 and ozone are unimodal. 
+
+
+```{r}
+# Environmental Variables
+environmental_variables_1<- c("PM25", "OZONE", "DSLPM", "CANCER", "RESP", "RSEI_AIR")
+
+# create 2 rows & 3 column plot layout 
+par(mfrow = c(2, 3))
+
+# use a for loop to plot each variable into a histogram
+for (variable in environmental_variables_1) {
+  hist(EJScreenDataFiltered[[variable]], main = variable, xlab = "")
+}
+
+# Reset plot layout
+par(mfrow = c(1,1))
+```
+
+To further investigate the environmental variables we plotted a second set of histograms with the following variables:
+
+* PTRAF = Traffic proximity
+* PRE1960 = Housing units built before 1960
+* PNPL = Superfund proximity
+* PRMP =  RMP facility proximity
+* PTSDF = Hazardous waste proximity
+* UST = Underground storage tanks
+
+From these second set of produced histograms, it is also evident that all of the environmental variables (Traffic proximity, Housing units built before 1960, Superfund proximity, RMP facility proximity, Hazardous waste proximity, Underground storage tanks) are highly skewed left. Similarly to above, this could also indicate some large outliers in these variables.
+
+```{r}
+# Second set of environmental variables 
+environmental_variables_2<- c("PTRAF", "PRE1960", "PNPL", "PRMP", "PTSDF", "UST")
+
+# create 2 rows & 3 column plot layout 
+par(mfrow = c(2, 3))
+
+# use a for loop to plot each variable into a histogram
+for (variable in environmental_variables_2) {
+  hist(EJScreenDataFiltered[[variable]], main = variable, xlab = "")
+}
+
+# Reset plot layout
+par(mfrow = c(1,1))
+```
+
+***
+To investigate if there are any disparities in environmental and socioeconomic factors across different states, we visualized the severity of particulate matter 2.5. Particulate matter 2.5 (PM2.5) refers to fine particles found in the air that are smaller than 2.5 micrometers in diameter. These particles are a type of air pollutant and are a major concern for public health because of their ability to penetrate deep into the respiratory system and cause various adverse health effects.
+
+The following code produces a map of the United States that shows the severity of air toxins cancer risk by state. From the EJScreenData_EJIndex, data was grouped together by state and the code calculates the mean for each column in the grouped data, excluding any missing values (NA). `map_data("state")` was called to get the map of the United States with its longitudes and latitudes to visualize the map. The state means and the map data were then merged together to visualize the average of particulate matter 2.5 across different states. 
+
+From the plot it can be seen there are higher levels of particulate matter 2.5 in the Southern region of the United States with some states near Indiana, Wisconsin, and California. The middle West part of the United States seem to have low levels of particulate matter 2.5 
+
+```{r}
+# Calculating the means of each state 
+stateMeans <- EJScreenDataFiltered %>%
+  group_by(STATE_NAME) %>%
+  summarize(across(everything(), mean, na.rm = TRUE))
+
+# Getting map data 
+map <- map_data("state")
+map$region <- toupper(map$region)
+stateMeans$STATE_NAME <- toupper(stateMeans$STATE_NAME)
+
+# Merge data frames
+mergedMapData <- merge(map, stateMeans, by.x = "region", by.y = "STATE_NAME", all.x = TRUE)
+
+# Create map plot
+ggplot() +
+  geom_map(data = mergedMapData, map = mergedMapData,
+           aes(x = long, y = lat, map_id = region, fill = PM25),
+           color = "blue") +
+  scale_fill_gradient(name = "Particulate Matter 2.5") +
+  theme_void() +
+  coord_map()
+```
+
+Similarly, the average percentage of low life expectancy per state was plotted on a map. 
+
+```{r}
+ggplot() +
+  geom_map(data = mergedMapData, map = mergedMapData,
+           aes(x = long, y = lat, map_id = region, fill = LIFEEXPPCT),
+           color = "blue") +
+  scale_fill_gradient(name = "EJScreen Index % Low Life Expectancy") +
+  theme_void() +
+  coord_map()
+```
+This map shows the percentage of the population with low life expectancy per state. We can see that many of the southern states show a greater percentage of the population with a low life expectancy. Meanwhile, northeastern and West-Coast states show lower rates of low life expectancy. A further step this visualization would indicate is grouping states by region to draw conclusions. 
+
+
+The following code is designed to produce a scatterplot with "Less than high school education" on the x-axis and "Low income" on the y-axis. The data points' transparency was changed to see the intensity of overlap between data points in the lower-left quadrant because of the clustering of datapoints in that area.
+
+```{r}
+ggplot(EJScreenDataFiltered, aes(x = LESSHS, y = LOWINCOME)) +
+  geom_point(alpha=0.2) +
+  geom_smooth(method='lm', formula= y~x) +
+  labs(title = "Less than high school education vs Low income",
+       x = "Less than high school education",
+       y = "Low income")
+```
+Adding a regression line to the plot shows that there is a positive trend, but it is likely due to the outliers.
+A reasonable next step would be to get rid of the outliers for this variable to see its impact on the linear model. 
+
+### More data cleaning
+
+```{r}
+q1 <- quantile(EJScreenDataFiltered$LESSHS, 0.25)
+q3 <- quantile(EJScreenDataFiltered$LESSHS, 0.75)
+iqr <- q3 - q1
+lower_bound <- q1 - 1.5 * iqr
+upper_bound <- q3 + 1.5 * iqr
+
+# Filter out the outliers
+filtered_data <- EJScreenDataFiltered %>%
+  filter(LESSHS >= lower_bound & LESSHS <= upper_bound) %>%
+  filter(LOWINCOME >=0 & LOWINCOME <= 5000)
+
+```
+
+```{r}
+ggplot(filtered_data, aes(x = LESSHS, y = LOWINCOME)) +
+  geom_point(alpha=0.2) +
+  geom_smooth(method='lm', formula= y~x) +
+  labs(title = "Less than high school education vs Low income",
+       x = "Less than high school education",
+       y = "Low income")
+```
+By getting rid of outliers and re-scaling our axes, we see that there still exists a positive linear relationship between the LOWINCOME and LESSHS variables, but it is not as extreme as the linear model seen in the previous figure. Therefore, it is important that we further clean our data to get rid of extreme outliers that can affect our analysis.
+
+
+### PM25 vs POC
+
+Here, we investigate the relationship of the percentage of people of color with the prevalence of particulate matter of 2.5 in the region. The ggplot module was used with the `geom_bin2d()` function to visualize the distribution of the data points. Since we are working with a large dataset, visualizing and gaining an understanding of how many points are in each region is difficult; however, through the usage of `geom_bin2d()` we can gain an understanding on how the scatter points are distributed. We can see that there is a slight positive trend, with a larger percentage of people of color in an area correlating to higher levels of potentially hazardous particulate matter.  
+```{r}
+# use the ggplot module with the geom_bin2d to see the distribution of points 
+ggplot(data = EJScreenDataFiltered) +
+  geom_bin2d(mapping = aes(x = PEOPCOLORPCT, y = PM25))
+```
+
+
+## Conclusions/Next Steps
+Now that we have an idea of how our data looks and how certain variables relate to one another, we can consider deeper investigation into potential reasons as to why we see the trends we do. For example, how does increased particulate matter relate to the percentage of the population who identify as people of color? Additionally, do certain areas or groups have fewer resources, such as Superfunds or treatment facilities that help combat environmental issues? Our EDA was on a macroscopic level, but if we wanted to look at certain regions and combine political or historical information about them, we can look at the data by state/county, perhaps with a focus on Georgia or the Atlanta area. By narrowing down our research to a specific geographic region, we could find even stronger patterns in our data.
+
+For future research, we will aim to become more literate in the subject area along with Diversity and Equity practices as we continue to explore questions like the one listed above.
+
+#### Citation
+We acquired data from the Environmental Protection Agency's Environmental Justice Screening and Mapping Tool called EJScreen. 
+
+United States Environmental Protection Agency. 2023. EJScreen. Retrieved: February, 22, 2024, from https://gaftp.epa.gov/EJScreen/2023/2.22_September_UseMe/EJSCREEN_2023_BG_with_AS_CNMI_GU_VI.csv.zip] 
+
+
+#### Code for wordcount
+```{r}
+library(rmdwc)
+
+file_path <- "/Users/ayeshasaeed/Documents/Spring 2024/ENGRD 302W/EDA_3_22.rmd" # Provide the correct file path to your R Markdown file
+
+word_count <- rmdcount(file_path) # Get word count, excluding code chunks
+
+print(word_count) # Print word count
+```
+
